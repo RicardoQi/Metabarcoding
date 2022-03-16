@@ -1,0 +1,107 @@
+---
+title: "Metabarcoding"
+author: "RicardoQi"
+date: '2022-03-16'
+output: html_document
+---
+The code is written by RicardoQi for the purpose of metabarcoding analysis. The floristic survey data is used to determine the influence of garlic mustard on local plant species at QUBS.
+
+***
+
+## Setup
+```{r}
+library(tidyverse)
+library(vegan)
+library(lmtest)
+library(car)
+library(coefplot)
+```
+***
+## Data
+The floristic survey data csv is imported and divided to two halves to separate the plant species and the conditions of garlic mustard.
+```{r}
+FloristicSurvey <- read.csv("C:\\Users\\qi199\\Documents\\Metabarcoding\\Data\\FloristicSurvey.csv")
+MyData<-FloristicSurvey[,1:10]
+MyData$Population<-as.factor(MyData$Population)
+
+SpeciesComp<-FloristicSurvey[,11:length(FloristicSurvey)]
+rownames(SpeciesComp)<-MyData[,1]
+```
+Two new columns are created. Richness measures the diversity of species numbers, and Shannon refers to the Shannon diversity index.
+```{r}
+MyData$Richness<-rowSums(SpeciesComp!=0)
+MyData$Shannon<-diversity(SpeciesComp, index = "shannon", MARGIN = 1, base = exp(1))
+```
+A model is simulated and then fitted to known distribution.
+```{r}
+mod1<-lm(Richness~ Population + Location + Rosettes + Bolting+ Budding + Bud_Flw, data = MyData)
+car::qqp(MyData$Richness, "norm")
+plot(mod1)  
+```  
+
+Then each parameter of the data is tested.
+```{r}
+summary(mod1)
+```
+
+***
+
+A boxplot is created based on the species richness and the location.
+```{r}
+ggplot(MyData, aes(y=Richness,x=Location))+
+  geom_boxplot(aes(color=Location))+
+  labs(y="Richness")
+```
+
+The boxplot indicates that the existence of garlic mustard affects the richness of plant species as the richness outside the garlic mustard patches is lower comparing to the one inside. 
+
+***
+
+## RDA
+A redundancy analysis helps rationalize the data using a multivariant model.
+```{r}
+SpeciesComp.hell <- decostand(SpeciesComp, "hell")
+var <-MyData[,c(2:6)]
+formulaRDA<- rda(SpeciesComp.hell ~ Location+Rosettes+Bolting+Budding+Population, data=var, scale=T)
+```
+The RDA model is visualized.
+```{r}
+smry <- summary(formulaRDA)
+df1  <- data.frame(smry$sites[,1:2])       # RDA1 and RDA2 (for each quadrate)
+df2  <- data.frame(smry$biplot[,1:2])     # loadings for RDA1 and RDA2 (for each variable)
+rda.plot <- ggplot(df1, aes(x=RDA1, y=RDA2)) + 
+  geom_text(aes(label=rownames(df1)),size=3,position=position_jitter(width=.2,height=.2)) +
+  geom_point(aes(alpha=0.3)) +
+  geom_hline(yintercept=0, linetype="dotted") +
+  geom_vline(xintercept=0, linetype="dotted")  
+
+
+(formulaRDA.PLOT<-rda.plot +
+  geom_segment(data=df2, aes(x=0, xend=RDA1, y=0, yend=RDA2), 
+               color="red", arrow=arrow(length=unit(0.01,"npc"))) +
+  geom_text(data=df2, 
+            aes(x=RDA1,y=RDA2,label=rownames(df2),
+                hjust=0.5*(1-sign(RDA1)),vjust=0.5*(1-sign(RDA2))), 
+            color="red", size=4)+ theme(legend.position="none"))
+```
+
+According to this plot, the vector of sampling population is longer than the ones of presence of garlic mustard, which means that sampling population has greater effect on plant communities. 
+
+***
+
+## NMDS
+NMDS helps visualize the similarity or differences among species, and it is done as a bivariate plot. First, a data matrix is created. 
+```{r}
+M <- as.matrix(SpeciesComp)
+dist_M <- vegdist(M, method = "bray", binary = T)
+meta.nmds <- metaMDS(dist_M,k=2)
+```
+
+Adding points to the NMDS, and plotting the result.
+```{r}
+NMDS.data<-data.frame(Location=MyData$Location,Population=MyData$Population) 
+NMDS.data$NMDS1<-meta.nmds$points[ ,1] 
+NMDS.data$NMDS2<-meta.nmds$points[ ,2] 
+ggplot(data = NMDS.data, aes(y = NMDS2, x = NMDS1))+ 
+    geom_point( aes(color = Population,shape = Location), size = 1.5,alpha=0.6)
+```
